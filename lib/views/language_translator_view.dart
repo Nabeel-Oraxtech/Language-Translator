@@ -15,18 +15,53 @@ class _LanguageTranslatorViewState extends State<LanguageTranslatorView> {
   final _controller = TextEditingController();
   var _sourceLanguage = TranslateLanguage.english;
   var _targetLanguage = TranslateLanguage.spanish;
-  late OnDeviceTranslator _onDeviceTranslator;
+  OnDeviceTranslator? _onDeviceTranslator;
 
   final _languageIdentifier = LanguageIdentifier(confidenceThreshold: 0.5);
-  // ignore: unused_field
   var _identifiedLanguage = '';
-  bool _isLoading = false; 
+  bool _isLoading = false;
+
+  final Map<String, OnDeviceTranslator> _translatorCache = {};
 
   @override
   void initState() {
     super.initState();
-    _onDeviceTranslator = OnDeviceTranslator(
-        sourceLanguage: _sourceLanguage, targetLanguage: _targetLanguage);
+    _preloadTranslators();
+    _initializeTranslator();
+    _warmUpTranslator();
+  }
+
+  void _preloadTranslators() {
+    for (var sourceLang in TranslateLanguage.values) {
+      for (var targetLang in TranslateLanguage.values) {
+        final key = '${sourceLang.bcpCode}-${targetLang.bcpCode}';
+        _translatorCache[key] = OnDeviceTranslator(
+          sourceLanguage: sourceLang,
+          targetLanguage: targetLang,
+        );
+      }
+    }
+  }
+
+  void _initializeTranslator() {
+    final key = '${_sourceLanguage.bcpCode}-${_targetLanguage.bcpCode}';
+    _onDeviceTranslator = _translatorCache[key] ?? OnDeviceTranslator(
+      sourceLanguage: _sourceLanguage,
+      targetLanguage: _targetLanguage,
+    );
+  }
+
+  void _updateTranslator(TranslateLanguage source, TranslateLanguage target) {
+    final key = '${source.bcpCode}-${target.bcpCode}';
+    _onDeviceTranslator = _translatorCache[key] ?? OnDeviceTranslator(
+      sourceLanguage: source,
+      targetLanguage: target,
+    );
+  }
+
+  void _warmUpTranslator() async {
+    final dummyText = "Warm-up";
+    await _onDeviceTranslator?.translateText(dummyText);
   }
 
   @override
@@ -44,30 +79,30 @@ class _LanguageTranslatorViewState extends State<LanguageTranslatorView> {
             children: [
               const SizedBox(height: 30),
               Center(
-                  child: Text('Enter Text (detected source: ${_sourceLanguage.name})')),
+                child: Text('Enter Text (detected source: ${_sourceLanguage.name})'),
+              ),
               Padding(
                 padding: const EdgeInsets.all(20.0),
                 child: Row(
                   children: [
                     Expanded(
-                        child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 20),
-                      decoration: BoxDecoration(
-                          border: Border.all(
-                        width: 2,
-                      )),
-                      child: TextField(
-                        controller: _controller,
-                        decoration:
-                            const InputDecoration(border: InputBorder.none),
-                        maxLines: null,
-                        onChanged: (text) {
-                          if (text.isNotEmpty) {
-                            _identifyAndTranslate(text);
-                          }
-                        },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 20),
+                        decoration: BoxDecoration(
+                          border: Border.all(width: 2),
+                        ),
+                        child: TextField(
+                          controller: _controller,
+                          decoration: const InputDecoration(border: InputBorder.none),
+                          maxLines: null,
+                          onChanged: (text) {
+                            if (text.isNotEmpty) {
+                              _identifyAndTranslate(text);
+                            }
+                          },
+                        ),
                       ),
-                    )),
+                    ),
                     const SizedBox(width: 20),
                     _buildDropdown(false),
                   ],
@@ -75,23 +110,23 @@ class _LanguageTranslatorViewState extends State<LanguageTranslatorView> {
               ),
               const SizedBox(height: 30),
               Center(
-                  child: Text(
-                      'Translated Text (target: ${_targetLanguage.name})')),
+                child: Text('Translated Text (target: ${_targetLanguage.name})'),
+              ),
               Padding(
                 padding: const EdgeInsets.all(20.0),
                 child: Row(
                   children: [
                     Expanded(
                       child: Container(
-                          width: MediaQuery.of(context).size.width / 1.3,
-                          padding: const EdgeInsets.all(20),
-                          decoration: BoxDecoration(
-                              border: Border.all(
-                            width: 2,
-                          )),
-                          child: _isLoading 
-                              ? const Center(child: CircularProgressIndicator())
-                              : Text(_translatedText ?? '')),
+                        width: MediaQuery.of(context).size.width / 1.3,
+                        padding: const EdgeInsets.all(20),
+                        decoration: BoxDecoration(
+                          border: Border.all(width: 2),
+                        ),
+                        child: _isLoading
+                            ? const Center(child: CircularProgressIndicator())
+                            : Text(_translatedText ?? ''),
+                      ),
                     ),
                     const SizedBox(width: 20),
                     _buildDropdown(true),
@@ -99,11 +134,15 @@ class _LanguageTranslatorViewState extends State<LanguageTranslatorView> {
                 ),
               ),
               const SizedBox(height: 30),
-              Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                ElevatedButton(
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  ElevatedButton(
                     onPressed: () => _identifyAndTranslate(_controller.text),
-                    child: const Text('Translate'))
-              ]),
+                    child: const Text('Translate'),
+                  ),
+                ],
+              ),
             ],
           ),
         ),
@@ -127,11 +166,10 @@ class _LanguageTranslatorViewState extends State<LanguageTranslatorView> {
               setState(() {
                 if (isTarget) {
                   _targetLanguage = lang;
+                  _updateTranslator(_sourceLanguage, _targetLanguage);
                 } else {
                   _sourceLanguage = lang;
-                  _onDeviceTranslator = OnDeviceTranslator(
-                      sourceLanguage: _sourceLanguage,
-                      targetLanguage: _targetLanguage);
+                  _updateTranslator(_sourceLanguage, _targetLanguage);
                 }
               });
             }
@@ -149,9 +187,9 @@ class _LanguageTranslatorViewState extends State<LanguageTranslatorView> {
     if (text.isEmpty) return;
 
     setState(() {
-      _isLoading = true; 
+      _isLoading = true;
     });
-    
+
     String identifiedLanguage;
     try {
       identifiedLanguage = await _languageIdentifier.identifyLanguage(text);
@@ -168,7 +206,7 @@ class _LanguageTranslatorViewState extends State<LanguageTranslatorView> {
     if (identifiedLanguage.startsWith('error')) {
       setState(() {
         _identifiedLanguage = identifiedLanguage;
-        _isLoading = false; // Set loading to false on error
+        _isLoading = false;
       });
       return;
     }
@@ -177,20 +215,19 @@ class _LanguageTranslatorViewState extends State<LanguageTranslatorView> {
     if (sourceLang == null) {
       setState(() {
         _identifiedLanguage = 'error: unsupported language identified!';
-        _isLoading = false; 
+        _isLoading = false;
       });
       return;
     }
 
     _sourceLanguage = sourceLang;
-    _onDeviceTranslator = OnDeviceTranslator(
-        sourceLanguage: _sourceLanguage, targetLanguage: _targetLanguage);
+    _updateTranslator(_sourceLanguage, _targetLanguage);
 
-    final translatedText = await _onDeviceTranslator.translateText(_controller.text);
-    
+    final translatedText = await _onDeviceTranslator!.translateText(_controller.text);
+
     setState(() {
       _translatedText = translatedText;
-      _isLoading = false; 
+      _isLoading = false;
     });
   }
 
@@ -205,7 +242,7 @@ class _LanguageTranslatorViewState extends State<LanguageTranslatorView> {
 
   @override
   void dispose() {
-    _onDeviceTranslator.close();
+    _onDeviceTranslator?.close();
     _languageIdentifier.close();
     super.dispose();
   }
